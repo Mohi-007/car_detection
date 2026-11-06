@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>JARVIS Holographic Car Explorer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#020a14;overflow:hidden;font-family:"Courier New",monospace;color:#7df9ff}
+canvas#c{position:fixed;inset:0;width:100%;height:100%}
+.scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,255,255,.04) 0 1px,transparent 1px 3px);z-index:5}
+.p{position:fixed;background:rgba(0,30,50,.55);border:1px solid #0ff5;padding:10px 12px;font-size:12px;line-height:1.5;z-index:6;box-shadow:0 0 14px #0ff3 inset}
+.p h3{margin:0 0 6px;font-size:13px;letter-spacing:2px;color:#fff}
+#hud{top:12px;left:12px;min-width:230px}#info{top:12px;right:12px;width:270px;display:none}
+#guide{bottom:12px;left:12px}#cam{bottom:12px;right:12px;width:232px}
+#cam .v{position:relative;width:210px;height:158px;transform:scaleX(-1)}
+#cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%;opacity:.8}
+#ctl{bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:55vw;justify-content:center}
+button{background:#043;color:#7df9ff;border:1px solid #0ff8;padding:5px 9px;font:inherit;cursor:pointer}button:hover,button.on{background:#0ff3;color:#fff}
+input[type=range]{width:90px}
+#boot{position:fixed;inset:0;background:#020a14;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center}
+#boot h1{letter-spacing:6px;color:#fff;text-shadow:0 0 12px #0ff}
+#ring{position:fixed;left:50%;top:45%;width:90px;height:90px;margin:-45px;border-radius:50%;z-index:7;display:none;text-align:center;line-height:90px;color:#fff;font-size:11px}
+.ok{color:#5f5}.warn{color:#fa0}
+</style></head><body>
+<canvas id="c"></canvas><div class="scan"></div>
+<div id="boot"><h1>JARVIS VEHICLE ANALYSIS SYSTEM</h1><div id="log"></div>
+<button id="go" style="display:none;margin-top:14px;padding:10px 18px">ENABLE CAMERA &amp; START</button>
+<button id="nocam" style="display:none">CONTINUE WITHOUT CAMERA (mouse mode)</button></div>
+<div class="p" id="hud"><h3>JARVIS VEHICLE ANALYSIS</h3>
+SYSTEM: <span class="ok">ONLINE</span><br>VISION: <span id="vis">OFFLINE</span><br>HAND TRACKING: <span id="conf">0</span>%<br>
+GESTURE: <span id="gest">NONE</span><br>SELECTED: <span id="selh">-</span><br>
+EXPLOSION: <span id="exh">0</span>% (LVL <span id="lvl">0</span>)<br>ZOOM: <span id="zh">1.00</span>x<br>ROT: <span id="rh">0,0</span><br>FPS: <span id="fps">0</span></div>
+<div class="p" id="info"></div>
+<div class="p" id="guide"><h3>GESTURES</h3>2 HANDS OPEN+APART: explode<br>2 FISTS: assemble<br>1 OPEN HAND move: rotate<br>PINCH: select / PINCH+MOVE: drag part<br>2 HANDS PINCH apart/close: zoom<br>1 FIST hold 1s: reset<br><span style="opacity:.6">Mouse: drag=rotate, wheel=zoom, click=select</span></div>
+<div class="p" id="cam"><div class="v"><video id="vid" playsinline muted></video><canvas id="ov" width="320" height="240"></canvas></div><div id="camst">CAMERA: OFF</div>
+<button id="stop" style="display:none">STOP CAMERA</button></div>
+<div class="p" id="ctl">
+<label>EXPLODE <input type="range" id="exs" min="0" max="100" value="0"></label>
+<label>SENS <input type="range" id="sens" min="3" max="20" value="10"></label>
+<button id="bres">RESET</button><button id="bauto">AUTO-ROTATE</button><button id="bx">X-RAY</button><button id="bwf">WIREFRAME</button><button id="bae">AUTO-EXPLODE</button></div>
+<div id="ring"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+// ---------- DEMO MODEL: separate primitive components (clearly a placeholder, not a real car mesh) ----------
+// id,name,geo,size,pos,explodeVec,function,material,connected
+const D=[
+["body","Car Body (demo shell)","box",[4,.5,1.8],[0,1,0],[0,2.2,0],"Outer shell protecting occupants and giving aerodynamic shape.","Steel / aluminium",["chassis","dashboard","seats"]],
+["chassis","Chassis Frame","box",[3.8,.12,1.6],[0,.35,0],[0,-.3,0],"Structural backbone carrying all loads.","High-strength steel",["suspension","battery","body"]],
+["battery","Battery Pack","box",[1.9,.18,1.2],[-.1,.15,0],[0,-1.6,0],"Stores energy (400V Li-ion) for the traction motor.","Li-ion cells, aluminium case",["inverter","motor","ecu","cooling"]],
+["inverter","Power Electronics / Inverter","box",[.5,.3,.5],[1,.6,0],[.6,1,0],"Converts DC from battery to AC for the motor.","SiC semiconductors",["battery","motor","ecu"]],
+["motor","Electric Motor","cyl",[.3,.6,0],[1.45,.5,0],[1.6,.2,0],"Converts electrical energy into mechanical motion.","Copper windings, steel rotor",["inverter","transmission","cooling"]],
+["transmission","Transmission","box",[.5,.35,.4],[1.45,.4,.55],[1.6,-.5,1.1],"Reduces motor speed and delivers torque to wheels.","Hardened steel gears",["motor","wheel_fl","wheel_fr"]],
+["cooling","Cooling System","box",[.3,.5,.9],[2.0,.6,0],[2.6,.6,0],"Keeps battery, motor and inverter in temperature range.","Aluminium radiator, glycol",["battery","motor","inverter"]],
+["ecu","ECU","box",[.3,.1,.4],[.4,.62,.5],[0,1.2,1.6],"Central controller for powertrain and sensors.","PCB, aluminium housing",["battery","inverter","sensors","airbags"]],
+["sensors","Sensor Array","sph",[.15],[2.1,1,.7],[1.8,1.3,1.8],"Radar, camera and ultrasonic sensing.","Silicon, polymer",["ecu"]],
+["steering","Steering System","cyl",[.05,1.2,0],[1.1,.8,-.45],[0,.8,-1.8],"Turns driver input into wheel angle.","Steel rack",["wheel_fl","wheel_fr","dashboard"]],
+["suspension","Suspension","box",[2.8,.08,.1],[1,.4,0],[0,-.9,0],"Absorbs shocks; keeps tyres on the road.","Spring steel",["chassis","wheel_fl","wheel_fr"]],
+["dashboard","Dashboard","box",[.4,.3,1.5],[.6,1.15,0],[-.3,1.9,0],"Driver displays and controls.","Polymer, glass",["steering","ecu"]],
+["seats","Seats","box",[.6,.5,1.2],[-.6,.8,0],[-1.2,1.3,0],"Occupant support and restraint anchor.","Foam, fabric, steel",["airbags","chassis"]],
+["airbags","Airbags","sph",[.22],[.5,.95,0],[0,2.1,0],"Cushion occupants in a collision.","Nylon, inflator",["ecu","dashboard"]],
+["wheel_fl","Wheel + Brake FL","wheel",[.4,.25],[1.3,.4,1.0],[1.8,-.1,2.2],"Contact with road; disc brake slows rotation.","Alloy, rubber, steel disc",["suspension","transmission"]],
+["wheel_fr","Wheel + Brake FR","wheel",[.4,.25],[1.3,.4,-1.0],[1.8,-.1,-2.2],"Contact with road; disc brake slows rotation.","Alloy, rubber, steel disc",["suspension","transmission"]],
+["wheel_rl","Wheel + Brake RL","wheel",[.4,.25],[-1.3,.4,1.0],[-1.8,-.1,2.2],"Rear wheel with brake.","Alloy, rubber, steel disc",["suspension"]],
+["wheel_rr","Wheel + Brake RR","wheel",[.4,.25],[-1.3,.4,-1.0],[-1.8,-.1,-2.2],"Rear wheel with brake.","Alloy, rubber, steel disc",["suspension"]]
+];
+const $=id=>document.getElementById(id);
+const R=new THREE.WebGLRenderer({canvas:$('c'),antialias:true,alpha:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
+const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(50,1,.1,100);cam.position.set(0,2.5,8);cam.lookAt(0,.8,0);
+const root=new THREE.Group();S.add(root);const car=new THREE.Group();car.position.y=-.2;root.add(car);
+const grid=new THREE.GridHelper(14,28,0x0ff,0x044);grid.position.y=-.5;grid.material.transparent=true;grid.material.opacity=.35;S.add(grid);
+const ring=new THREE.Mesh(new THREE.RingGeometry(3.2,3.25,64),new THREE.MeshBasicMaterial({color:0x0ff,side:2,transparent:true,opacity:.6}));ring.rotation.x=-Math.PI/2;ring.position.y=-.49;S.add(ring);
+const pg=new THREE.BufferGeometry(),pn=300,pp=new Float32Array(pn*3);for(let i=0;i<pn*3;i++)pp[i]=(Math.random()-.5)*12;pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+const parts=new THREE.Points(pg,new THREE.PointsMaterial({color:0x7df9ff,size:.03,transparent:true,opacity:.6}));S.add(parts);
+const comps={},meshes=[];
+function geo(t,s){if(t=="box")return new THREE.BoxGeometry(...s);if(t=="sph")return new THREE.SphereGeometry(s[0],16,12);
+ if(t=="cyl"){const g=new THREE.CylinderGeometry(s[0],s[0],s[1],20);g.rotateX(Math.PI/2);return g}
+ const g=new THREE.CylinderGeometry(s[0],s[0],s[1],24);g.rotateX(Math.PI/2);return g}
+D.forEach(d=>{const g=new THREE.Group(),G=geo(d[2],d[3]);
+ const fill=new THREE.Mesh(G,new THREE.MeshBasicMaterial({color:0x0aa,transparent:true,opacity:.14,blending:THREE.AdditiveBlending,depthWrite:false}));fill.userData.id=d[0];
+ const edge=new THREE.LineSegments(new THREE.EdgesGeometry(G),new THREE.LineBasicMaterial({color:0x4ff,transparent:true,opacity:.9}));
+ g.add(fill,edge);g.position.set(...d[4]);car.add(g);meshes.push(fill);
+ comps[d[0]]={d,g,fill,edge,o:new THREE.Vector3(...d[4]),e:new THREE.Vector3(...d[5]),off:new THREE.Vector3()}});
+const connGeo=new THREE.BufferGeometry();connGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(60*3),3));
+const conn=new THREE.LineSegments(connGeo,new THREE.LineBasicMaterial({color:0xffcc33,transparent:true,opacity:.9}));conn.frustumCulled=false;car.add(conn);
+// ---------- state ----------
+const st={ex:0,exT:0,sel:null,zoom:1,zoomT:1,rx:0,ry:.6,rxT:0,ryT:.6,auto:false,xray:false,wf:false,autoEx:false,sens:10,cam:false};
+function resetAll(){st.exT=0;st.zoomT=1;st.rxT=0;st.ryT=.6;st.auto=false;st.autoEx=false;select(null);Object.values(comps).forEach(c=>c.off.set(0,0,0));$('exs').value=0}
+function select(id){st.sel=id;const i=$('info');if(!id){i.style.display='none';$('selh').textContent='-';return}
+ const c=comps[id].d;i.style.display='block';$('selh').textContent=c[1].toUpperCase();
+ i.innerHTML=`<h3>${c[1].toUpperCase()}</h3><b>Function:</b> ${c[6]}<br><b>Material:</b> ${c[7]}<br><b>Status:</b> <span class="ok">Operational</span><br><b>Location:</b> ${c[4].map(v=>v.toFixed(1)).join(', ')}<br><b>Connected:</b><br>${c[8].map(k=>'&bull; '+comps[k].d[1]).join('<br>')}`}
+function pick(nx,ny){const rc=new THREE.Raycaster();rc.setFromCamera(new THREE.Vector2(nx*2-1,-(ny*2-1)),cam);const h=rc.intersectObjects(meshes);return h.length?h[0].object.userData.id:null}
+// ---------- gesture recognition (MediaPipe landmarks) ----------
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function classify(l){const s=dist(l[0],l[9])||1,pd=dist(l[4],l[8])/s;let c=0;[[12,10],[16,14],[20,18]].forEach(([t,p])=>{if(dist(l[t],l[0])<dist(l[p],l[0]))c++});
+ if(pd<.2)return'PINCH';if(c==3)return'FIST';return'OPEN'}
+const slots=[{g:'NONE',cand:'NONE',n:0,p:null,sm:null},{g:'NONE',cand:'NONE',n:0,p:null,sm:null}];
+function stab(s,g){if(g==s.cand)s.n++;else{s.cand=g;s.n=1}if(s.n>=3&&s.g!=g){s.g=g;s.p=null}return s.g} // needs 3 consistent frames
+let zoomRef=null,fistT=0,pinchSel=false,confS=0;
+const ov=$('ov'),oc=ov.getContext('2d');
+function onRes(r){const L=r.multiHandLandmarks||[];oc.clearRect(0,0,320,240);
+ L.forEach(l=>{oc.fillStyle='#0ff';l.forEach(p=>oc.fillRect(p.x*320-2,p.y*240-2,4,4))});
+ const sc=(r.multiHandedness||[]).reduce((a,h)=>a+h.score,0)/Math.max(1,L.length);confS=L.length?confS*.8+sc*.2:confS*.8;$('conf').textContent=Math.round(confS*100);
+ const H=L.map(l=>({l,x:1-l[9].x,y:l[9].y})).sort((a,b)=>a.x-b.x).slice(0,2);
+ const gs=H.map((h,i)=>{const s=slots[i];if(!s.sm)s.sm={x:h.x,y:h.y};s.sm.x+=(h.x-s.sm.x)*.5;s.sm.y+=(h.y-s.sm.y)*.5;return stab(s,classify(h.l))});
+ for(let i=H.length;i<2;i++){slots[i].g='NONE';slots[i].p=null;slots[i].sm=null;slots[i].n=0}
+ let label='NONE';const k=st.sens/10;
+ if(H.length==2){const d=Math.hypot(slots[0].sm.x-slots[1].sm.x,slots[0].sm.y-slots[1].sm.y);fistT=0;ringHide();
+  if(gs[0]=='OPEN'&&gs[1]=='OPEN'){label='TWO HANDS: EXPLODE';st.exT=Math.max(0,Math.min(1,(d-.15)/(.6/k)));$('exs').value=st.exT*100;zoomRef=null}
+  else if(gs[0]=='FIST'&&gs[1]=='FIST'){label='TWO FISTS: ASSEMBLE';st.exT=0;$('exs').value=0}
+  else if(gs[0]=='PINCH'&&gs[1]=='PINCH'){label='TWO HAND ZOOM';if(!zoomRef)zoomRef={d,z:st.zoomT};st.zoomT=Math.max(.5,Math.min(2.5,zoomRef.z*d/zoomRef.d))}
+  else zoomRef=null}
+ else if(H.length==1){zoomRef=null;const s=slots[0],g=gs[0];
+  if(g=='FIST'){label='FIST (HOLD TO RESET)';fistT+=1/30;ringShow(fistT);if(fistT>=1){resetAll();fistT=0;ringHide()}}else{fistT=0;ringHide()}
+  if(g=='OPEN'){label='OPEN HAND: ROTATE';if(s.p){st.ryT+=(s.sm.x-s.p.x)*6*k;st.rxT=Math.max(-1.2,Math.min(1.2,st.rxT+(s.sm.y-s.p.y)*4*k))}s.p={x:s.sm.x,y:s.sm.y};pinchSel=false}
+  if(g=='PINCH'){label='PINCH';
+   if(!pinchSel){pinchSel=true;select(pick(s.sm.x,s.sm.y))}
+   else if(st.sel&&s.p){label='PINCH + MOVE';const v=new THREE.Vector3((s.sm.x-s.p.x)*9*k,-(s.sm.y-s.p.y)*7*k,0).applyQuaternion(cam.quaternion).applyQuaternion(root.quaternion.clone().invert()).divideScalar(st.zoom);comps[st.sel].off.add(v)}
+   s.p={x:s.sm.x,y:s.sm.y}}
+  else if(g!='PINCH')pinchSel=false}
+ else{fistT=0;ringHide();zoomRef=null;pinchSel=false}
+ $('gest').textContent=label+(H.length?' ('+Math.round(confS*100)+'%)':'')}
+function ringShow(t){const r=$('ring');r.style.display='block';r.style.background=`conic-gradient(#0ff ${Math.min(t,1)*360}deg,transparent 0)`;r.textContent='RESET VIEW'}
+function ringHide(){$('ring').style.display='none'}
+// ---------- camera ----------
+let hands=null,stream=null,looping=false;
+async function startCam(){try{
+ stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});const v=$('vid');v.srcObject=stream;await v.play();
+ hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+ hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.6});hands.onResults(onRes);
+ st.cam=true;$('vis').textContent='ACTIVE';$('vis').className='ok';$('camst').innerHTML='CAMERA: <span class="warn">ON (local processing only, no frames stored)</span>';$('stop').style.display='block';
+ if(!looping){looping=true;(async function loop(){if(st.cam&&v.readyState>=2){try{await hands.send({image:v})}catch(e){}}requestAnimationFrame(loop)})()}return true}
+ catch(e){$('camst').textContent='CAMERA ERROR: '+e.message;return false}}
+function stopCam(){st.cam=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$('vis').textContent='OFFLINE';$('vis').className='';$('camst').textContent='CAMERA: OFF';$('stop').style.display='none';oc.clearRect(0,0,320,240)}
+$('stop').onclick=stopCam;
+// ---------- mouse fallback + UI ----------
+let dr=null;const cv=$('c');
+cv.onpointerdown=e=>{dr={x:e.clientX,y:e.clientY,m:false}};
+addEventListener('pointermove',e=>{if(!dr)return;const dx=e.clientX-dr.x,dy=e.clientY-dr.y;if(Math.abs(dx)+Math.abs(dy)>3)dr.m=true;st.ryT+=dx*.006;st.rxT=Math.max(-1.2,Math.min(1.2,st.rxT+dy*.004));dr.x=e.clientX;dr.y=e.clientY});
+addEventListener('pointerup',e=>{if(dr&&!dr.m)select(pick(e.clientX/innerWidth,e.clientY/innerHeight));dr=null});
+cv.onwheel=e=>{st.zoomT=Math.max(.5,Math.min(2.5,st.zoomT*(e.deltaY<0?1.08:.93)))};
+$('exs').oninput=e=>st.exT=e.target.value/100;$('sens').oninput=e=>st.sens=+e.target.value;
+$('bres').onclick=resetAll;$('bauto').onclick=e=>{st.auto=!st.auto;e.target.classList.toggle('on',st.auto)};
+$('bx').onclick=e=>{st.xray=!st.xray;e.target.classList.toggle('on',st.xray)};$('bwf').onclick=e=>{st.wf=!st.wf;e.target.classList.toggle('on',st.wf)};
+$('bae').onclick=e=>{st.autoEx=!st.autoEx;e.target.classList.toggle('on',st.autoEx)};
+// ---------- render loop ----------
+const clk=new THREE.Clock();let fc=0,ft=0,tmp=new THREE.Vector3();
+function resize(){R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener('resize',resize);resize();
+function frame(){requestAnimationFrame(frame);const dt=clk.getDelta(),t=clk.elapsedTime;
+ if(st.autoEx)st.exT=.5+.5*Math.sin(t*.8);if(st.auto)st.ryT+=dt*.3;
+ const a=1-Math.pow(.001,dt);st.ex+=(st.exT-st.ex)*a;st.zoom+=(st.zoomT-st.zoom)*a;st.ry+=(st.ryT-st.ry)*a;st.rx+=(st.rxT-st.rx)*a;
+ root.rotation.set(st.rx,st.ry,0);root.scale.setScalar(st.zoom);
+ let n=0;const sc=comps[st.sel];
+ for(const k in comps){const c=comps[k];c.g.position.copy(c.o).addScaledVector(c.e,st.ex*1.4).add(c.off);
+  const isSel=k==st.sel,rel=sc&&sc.d[8].includes(k);
+  c.fill.visible=!st.wf;c.fill.material.opacity=(st.xray?.05:.14)*(sc&&!isSel&&!rel?.4:1)+(isSel?.25:0);
+  c.edge.material.color.setHex(isSel?0xffffff:rel?0xffcc33:0x4ff);c.edge.material.opacity=sc&&!isSel&&!rel?.3:.95}
+ if(sc){const p=conn.geometry.attributes.position;sc.d[8].forEach(k=>{p.setXYZ(n++,...sc.g.position.toArray());p.setXYZ(n++,...comps[k].g.position.toArray())});p.needsUpdate=true;conn.geometry.setDrawRange(0,n);conn.visible=true}else conn.visible=false;
+ parts.rotation.y=t*.03;ring.rotation.z=t*.3;grid.material.opacity=.3+.1*Math.sin(t*2);
+ R.render(S,cam);
+ fc++;ft+=dt;if(ft>.5){$('fps').textContent=Math.round(fc/ft);fc=0;ft=0}
+ $('exh').textContent=Math.round(st.ex*100);$('lvl').textContent=st.ex<.02?0:st.ex<.4?1:st.ex<.75?2:3;$('zh').textContent=st.zoom.toFixed(2);
+ $('rh').textContent=(st.rx*57.3).toFixed(0)+'°,'+((st.ry*57.3)%360).toFixed(0)+'°'}
+frame();
+// ---------- boot ----------
+(async()=>{const L=$('log'),w=ms=>new Promise(r=>setTimeout(r,ms));
+ for(const m of['Initializing Vision System...','Loading Holographic Model...','Initializing Hand Tracking...']){L.innerHTML+=m+'<br>';await w(600)}
+ L.innerHTML+=(typeof Hands=='undefined'?'<span class="warn">MediaPipe failed to load (check internet) - mouse mode available</span>':'<span class="ok">System Ready.</span>')+'<br>';
+ if(typeof Hands!='undefined')$('go').style.display='inline-block';$('nocam').style.display='inline-block';
+ const done=()=>{$('boot').style.display='none'};
+ $('go').onclick=async()=>{await startCam();done()};$('nocam').onclick=done})();
+</script></body></html>

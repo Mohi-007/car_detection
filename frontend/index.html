@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>3D Holographic Car</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="css/hologram.css">
+  <!-- MediaPipe Hands Browser Library (Local first with CDN fallback) -->
+  <script src="/mediapipe/hands.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';"></script>
+  <!-- ES Module Import Map for Three.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- 3D WebGL Canvas -->
+  <canvas id="webgl-canvas"></canvas>
+
+  <!-- Holographic CRT Scanlines & Vignette -->
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+
+  <!-- Interactive 3D Cursor Reticle -->
+  <div id="pinch-cursor"></div>
+  <div id="reset-ring">RESET VIEW</div>
+
+  <!-- Model Loading Overlay -->
+  <div id="loading-overlay">
+    <div class="loading-content">
+      <div class="loading-hex"></div>
+      <div class="loading-title">LOADING VEHICLE MODEL</div>
+      <div class="loading-bar-track">
+        <div class="loading-bar-fill" id="loading-bar-fill"></div>
+      </div>
+      <div class="loading-pct" id="loading-pct">0%</div>
+    </div>
+  </div>
+
+  <!-- Top Navigation & System Status Bar -->
+  <header id="top-bar">
+    <div class="brand">
+      <div class="brand-logo"></div>
+      <div class="brand-text">
+        <h1>3D HOLOGRAPHIC CAR</h1>
+        <span>MARK-VII DIGITAL TWIN TELEMETRY</span>
+      </div>
+    </div>
+    <div class="top-metrics">
+      <div class="metric-badge" id="ws-status-badge">
+        <span class="status-dot"></span> PYTHON WS: CONNECTED
+      </div>
+      <div class="metric-badge" id="vision-status-badge">
+        <span class="status-dot"></span> VISION: ACTIVE
+      </div>
+      <div class="metric-badge" id="research-status-badge">
+        <span class="status-dot"></span> RESEARCH MODE: STANDBY
+      </div>
+    </div>
+  </header>
+
+  <!-- Left HUD: Telemetry & Gesture Guide -->
+  <aside class="hud-panel" id="telemetry-panel">
+    <div class="panel-header">
+      <h2>SYSTEM TELEMETRY</h2>
+      <span class="panel-tag">LIVE HUD</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">SELECTED COMPONENT:</span>
+      <span class="telemetry-val" id="hud-selected-comp">NONE</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">HAND TRACKING CONF:</span>
+      <span class="telemetry-val" id="hud-confidence">0%</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">EXPLOSION DISASSEMBLY:</span>
+      <span class="telemetry-val" id="hud-explode">0%</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">CAMERA ZOOM:</span>
+      <span class="telemetry-val" id="hud-zoom">1.00x</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">ORIENTATION (Pitch, Yaw):</span>
+      <span class="telemetry-val" id="hud-rot">0, 28</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">ENGINE REFRESH RATE:</span>
+      <span class="telemetry-val"><span id="hud-fps">60</span> FPS</span>
+    </div>
+
+    <!-- Active Gesture Display -->
+    <div class="gesture-status-box">
+      <div class="gesture-status-title">ACTIVE GESTURE INTERACTION</div>
+      <div class="gesture-status-active" id="hud-gesture">READY</div>
+    </div>
+
+    <!-- Gesture Guide -->
+    <div class="panel-header" style="margin-top: 14px;">
+      <h2>TACTILE GESTURE PROTOCOLS</h2>
+      <span class="panel-tag">CALIBRATED</span>
+    </div>
+    <div class="gesture-guide-list">
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">PINCH</span>
+        <span>Select / Highlight component</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">PINCH + MOVE</span>
+        <span>Move component in 3D space</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">OPEN HAND MOVE</span>
+        <span>Rotate vehicle in 3D space</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">2-HAND PINCH</span>
+        <span>Zoom vehicle in / out</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">2 HANDS APART</span>
+        <span>Explode &amp; separate components</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">2 FISTS CLOSED</span>
+        <span>Snap reassemble whole vehicle</span>
+      </div>
+      <div class="gesture-guide-item">
+        <span class="gesture-badge">FIST HOLD 1s</span>
+        <span>Reset system &amp; view</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right HUD: Component Information & Research Diagnostics -->
+  <aside class="hud-panel" id="component-panel" style="display: none;">
+    <div class="panel-header">
+      <h2>COMPONENT TELEMETRY</h2>
+      <span class="panel-tag" id="comp-status">OPTIMAL</span>
+    </div>
+
+    <div class="component-title-box">
+      <div class="comp-name" id="comp-title">-</div>
+      <div class="comp-category" id="comp-category">-</div>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">ROLE:</span>
+      <span class="telemetry-val" id="comp-role" style="font-size: 11px; text-align: right; max-width: 220px;">-</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">MATERIAL:</span>
+      <span class="telemetry-val" id="comp-material">-</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">MASS:</span>
+      <span class="telemetry-val" id="comp-mass">-</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">DIAGNOSTIC CODE:</span>
+      <span class="telemetry-val" id="comp-dtc" style="color: var(--holo-teal, #00e5a3); font-weight: bold;">DTC-NOMINAL</span>
+    </div>
+
+    <div class="spec-grid" id="specs-container"></div>
+
+    <div style="margin-top: 10px;">
+      <div class="telemetry-label" style="font-size: 10px; margin-bottom: 4px;">LINKED SUBSYSTEMS:</div>
+      <div class="connected-tags" id="connected-list"></div>
+    </div>
+
+    <!-- Research Mode Diagnostics Section -->
+    <div class="research-container" id="research-container" style="display: none;">
+      <div class="panel-header" style="margin-bottom: 6px;">
+        <h2>CAN-FD SENSOR OSCILLOSCOPE</h2>
+        <span class="panel-tag">REAL-TIME</span>
+      </div>
+      <canvas id="telemetry-graph" class="live-graph-canvas" width="320" height="70"></canvas>
+      <div class="telemetry-row" style="margin-top: 6px; font-size: 10px;">
+        <span class="telemetry-label">THERMAL FLUX GRADIENT:</span>
+        <span class="telemetry-val" style="color: var(--holo-cyan, #00f0ff);">NORMAL (DELTA &lt; 3.2C)</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Webcam PiP Video Window -->
+  <div id="camera-pip">
+    <div class="pip-header">
+      <span>VISION SENSOR SKELETON</span>
+      <button class="hud-btn" id="btn-toggle-cam" style="padding: 2px 6px; font-size: 9px;">CAMERA</button>
+    </div>
+    <div class="pip-video-wrapper">
+      <video id="cam-video" playsinline muted></video>
+      <canvas id="cam-canvas" width="320" height="240"></canvas>
+    </div>
+  </div>
+
+  <!-- Bottom Control Dock -->
+  <nav id="dock">
+    <div class="dock-group">
+      <label class="dock-slider">
+        EXPLODE
+        <input type="range" id="slider-explode" min="0" max="100" value="0">
+      </label>
+      <label class="dock-slider">
+        SENS
+        <input type="range" id="slider-sens" min="3" max="25" value="10">
+      </label>
+    </div>
+
+    <div class="dock-group">
+      <button class="hud-btn primary" id="btn-assemble">ASSEMBLE</button>
+      <button class="hud-btn" id="btn-reset">RESET VIEW</button>
+      <button class="hud-btn" id="btn-autorotate">AUTO-ROTATE</button>
+    </div>
+
+    <div class="dock-group">
+      <button class="hud-btn" id="btn-xray">X-RAY</button>
+      <button class="hud-btn" id="btn-wireframe">WIREFRAME</button>
+      <button class="hud-btn" id="btn-thermal">THERMAL</button>
+      <button class="hud-btn primary" id="btn-research-mode">RESEARCH MODE</button>
+      <button class="hud-btn" id="btn-audio">AUDIO: ON</button>
+    </div>
+  </nav>
+
+  <!-- Boot Diagnostic Modal -->
+  <div id="boot-modal">
+    <h1>3D HOLOGRAPHIC CAR</h1>
+    <div id="boot-log"></div>
+    <div class="boot-btn-row">
+      <button class="hud-btn primary" id="btn-boot-start-cam" style="padding: 10px 22px; font-size: 13px;">
+        INITIALIZE WITH WEBCAM (GESTURES)
+      </button>
+      <button class="hud-btn" id="btn-boot-mouse" style="padding: 10px 22px; font-size: 13px;">
+        CONTINUE WITH MOUSE / KEYBOARD
+      </button>
+    </div>
+  </div>
+
+  <!-- ES Module Application Entrypoint -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

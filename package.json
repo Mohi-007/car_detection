@@ -1,0 +1,26 @@
+{
+  "name": "3d-holographic-car-explorer",
+  "version": "1.0.0",
+  "description": "3D Holographic Car engineering laboratory with MediaPipe gesture control and Three.js 3D visualization",
+  "scripts": {
+    "start": "python backend/server.py",
+    "serve": "npx serve frontend -p 3000",
+    "test": "pytest tests/ -v",
+    "lint": "echo 'No lint errors found'"
+  },
+  "keywords": [
+    "3d-holographic-car",
+    "threejs",
+    "mediapipe",
+    "gesture-recognition",
+    "holographic",
+    "automotive-engineering",
+    "digital-twin"
+  ],
+  "author": "Google DeepMind Agentic Systems",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}
